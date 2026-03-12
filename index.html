@@ -28,8 +28,14 @@
            from { opacity: 0; transform: scale(0.95) translateY(10px); }
            to { opacity: 1; transform: scale(1) translateY(0); }
        }
+       @keyframes fadeInContent {
+           from { opacity: 0; transform: translateX(20px); }
+           to { opacity: 1; transform: translateX(0); }
+       }
        .animate-fade-up { animation: fadeUp 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
        .animate-pop-in { animation: popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+       .animate-fade-in-content { animation: fadeInContent 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+       
        .delay-100 { animation-delay: 100ms; }
        .delay-200 { animation-delay: 200ms; }
        .delay-300 { animation-delay: 300ms; }
@@ -155,22 +161,72 @@
        };
 
        const ChatWidget = ({ isOpen, onClose }) => {
-           const [messages, setMessages] = useState([{ sender: 'bot', text: 'Hello! Please type your question, and our support bot will assist you shortly.' }]);
+           const [messages, setMessages] = useState([{ sender: 'bot', text: 'Hello! I am the Long Asia Support AI. How can I assist you today?' }]);
            const [input, setInput] = useState('');
+           const [isLoading, setIsLoading] = useState(false);
            const endOfMessagesRef = useRef(null);
 
            useEffect(() => {
                if(endOfMessagesRef.current) endOfMessagesRef.current.scrollIntoView({ behavior: 'smooth' });
-           }, [messages, isOpen]);
+           }, [messages, isOpen, isLoading]);
 
-           const handleSend = (e) => {
+           // Gemini API Setup
+           const apiKey = "";
+           const model = "gemini-2.5-flash-preview-09-2025";
+           const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+           const systemPrompt = `You are the official Support Bot for Long Asia Wealth Management. Answer user queries politely, professionally, and concisely.
+           Use the following internal knowledge to answer:
+           - Withdrawals: Normal withdrawals will be restored in 4 to 6 weeks. Phased rollout starts mid-next month.
+           - Cause: Precautionary security halt due to irregular API routing from a 3rd party.
+           - Security: Funds are fully backed 1:1 in Tier-1 institutional accounts.
+           - P2P Portal: Available as an immediate, alternative withdrawal method.
+           - Support: If a user has a highly specific account issue you cannot answer, tell them to email support@longasiagroups.com.
+           Keep all answers short (2-3 sentences max).`;
+
+           const handleSend = async (e) => {
                e.preventDefault();
-               if (!input.trim()) return;
-               setMessages(prev => [...prev, { sender: 'user', text: input }]);
+               const userQuery = input.trim();
+               if (!userQuery) return;
+               
+               setMessages(prev => [...prev, { sender: 'user', text: userQuery }]);
                setInput('');
-               setTimeout(() => {
-                   setMessages(prev => [...prev, { sender: 'bot', text: 'Thank you for your message. An agent will be assigned to review your account query momentarily.' }]);
-               }, 1000);
+               setIsLoading(true);
+
+               const payload = {
+                   contents: [{ parts: [{ text: userQuery }] }],
+                   systemInstruction: { parts: [{ text: systemPrompt }] }
+               };
+
+               const delays = [1000, 2000, 4000, 8000, 16000];
+               let attempt = 0;
+               let botResponse = "I am currently experiencing high network traffic. Please try again later or email support@longasiagroups.com.";
+
+               while (attempt < delays.length + 1) {
+                   try {
+                       const response = await fetch(endpoint, {
+                           method: 'POST',
+                           headers: { 'Content-Type': 'application/json' },
+                           body: JSON.stringify(payload)
+                       });
+
+                       if (!response.ok) throw new Error('API Error');
+
+                       const data = await response.json();
+                       botResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm sorry, I couldn't process that.";
+                       break;
+                   } catch (err) {
+                       if (attempt < delays.length) {
+                           await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+                           attempt++;
+                       } else {
+                           break;
+                       }
+                   }
+               }
+
+               setMessages(prev => [...prev, { sender: 'bot', text: botResponse }]);
+               setIsLoading(false);
            };
 
            if (!isOpen) return null;
@@ -181,7 +237,7 @@
                    <div className="bg-white/5 px-4 py-3 border-b border-white/10 flex justify-between items-center">
                        <div className="flex items-center gap-3">
                            <BotIcon className="w-5 h-5 text-white" />
-                           <span className="font-bold text-xs tracking-widest uppercase text-white">Support Bot</span>
+                           <span className="font-bold text-xs tracking-widest uppercase text-white">Support Bot (AI)</span>
                        </div>
                        <button onClick={onClose} className="text-neutral-500 hover:text-white transition-colors">
                            <Icon path={paths.close} className="w-5 h-5" />
@@ -197,6 +253,15 @@
                                </div>
                            </div>
                        ))}
+                       {isLoading && (
+                           <div className="flex justify-start">
+                               <div className="p-3 rounded-lg bg-white/10 text-white rounded-tl-none border border-white/5 flex gap-1 items-center">
+                                   <div className="w-2 h-2 bg-white/50 rounded-full animate-pulse"></div>
+                                   <div className="w-2 h-2 bg-white/50 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
+                                   <div className="w-2 h-2 bg-white/50 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></div>
+                               </div>
+                           </div>
+                       )}
                        <div ref={endOfMessagesRef} />
                    </div>
 
@@ -206,10 +271,11 @@
                            type="text"
                            value={input}
                            onChange={(e) => setInput(e.target.value)}
-                           placeholder="Type a direct question..."
+                           placeholder="Ask a question..."
                            className="flex-1 bg-white/5 border border-white/20 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-white/50 transition-colors"
+                           disabled={isLoading}
                        />
-                       <button type="submit" className="bg-white text-black px-4 py-2 text-xs font-bold uppercase tracking-wider rounded hover:bg-neutral-200 transition-colors">
+                       <button type="submit" disabled={isLoading} className="bg-white text-black px-4 py-2 text-xs font-bold uppercase tracking-wider rounded hover:bg-neutral-200 transition-colors disabled:opacity-50">
                            Send
                        </button>
                    </form>
@@ -221,6 +287,9 @@
            const [active, setActive] = useState(faqData[0].id);
            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
            const [chatOpen, setChatOpen] = useState(false);
+
+           // Get the currently active category data
+           const activeCategoryData = faqData.find(cat => cat.id === active);
 
            // Initialize Butter Smooth Scrolling
            useEffect(() => {
@@ -287,7 +356,7 @@
                        </div>
                    </nav>
 
-                   {/* Chat Widget */}
+                   {/* Chat Widget rendering */}
                    <ChatWidget isOpen={chatOpen} onClose={() => setChatOpen(false)} />
 
                    {/* Mobile Menu Overlay */}
@@ -330,15 +399,29 @@
                        </div>
                    </header>
 
-                   {/* Main Content */}
+                   {/* Main Content Area - Updated to Tabbed Interface */}
                    <main className="max-w-7xl mx-auto px-4 sm:px-8 pb-32 flex flex-col lg:flex-row gap-16 animate-fade-up delay-500 relative z-10">
-                       {/* Sidebar */}
+                       {/* Sidebar Index */}
                        <aside className="lg:w-1/4">
                            <div className="sticky top-40 bg-white/5 border border-white/10 p-6 backdrop-blur-md">
                                <p className="text-[10px] tracking-widest uppercase text-neutral-500 mb-6">Index</p>
                                {faqData.map(cat => (
-                                   <button key={cat.id} onClick={() => { setActive(cat.id); document.getElementById(cat.id).scrollIntoView({ behavior: 'smooth', block: 'center' }); }}
-                                           className={`w-full text-left py-4 px-4 mb-1 transition-all flex items-center gap-4 ${active === cat.id ? 'bg-white text-black shadow-[0_0_15px_rgba(255,255,255,0.5)]' : 'text-neutral-500 hover:text-white'}`}>
+                                   <button
+                                       key={cat.id}
+                                       onClick={() => {
+                                           setActive(cat.id);
+                                           // Smooth scroll to content on mobile devices when an index is clicked
+                                           if(window.innerWidth < 1024) {
+                                               const el = document.getElementById('faq-content-area');
+                                               if (el) {
+                                                   const yOffset = -120;
+                                                   const y = el.getBoundingClientRect().top + window.pageYOffset + yOffset;
+                                                   window.scrollTo({ top: y, behavior: 'smooth' });
+                                               }
+                                           }
+                                       }}
+                                       className={`w-full text-left py-4 px-4 mb-1 transition-all flex items-center gap-4 ${active === cat.id ? 'bg-white text-black shadow-[0_0_15px_rgba(255,255,255,0.5)]' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}
+                                   >
                                        <Icon path={cat.icon} />
                                        <span className="text-xs sm:text-sm font-bold uppercase tracking-wider">{cat.title}</span>
                                    </button>
@@ -346,14 +429,15 @@
                            </div>
                        </aside>
 
-                       {/* FAQ Sections */}
-                       <section className="lg:w-3/4">
-                           {faqData.map(cat => (
-                               <div key={cat.id} id={cat.id} className="mb-24 scroll-mt-48">
-                                   <h2 className="text-xl sm:text-2xl font-bold uppercase tracking-widest mb-10 border-b border-white/10 pb-4 leading-relaxed">{cat.title}</h2>
-                                   {cat.questions.map((q, i) => <FAQItem key={i} {...q} />)}
-                               </div>
-                           ))}
+                       {/* Active FAQ Section */}
+                       <section id="faq-content-area" className="lg:w-3/4 min-h-[500px]">
+                           {/* We use a key based on active ID so React remounts the div, triggering the animation again */}
+                           <div key={activeCategoryData.id} className="animate-fade-in-content">
+                               <h2 className="text-xl sm:text-2xl font-bold uppercase tracking-widest mb-10 border-b border-white/10 pb-4 leading-relaxed">
+                                   {activeCategoryData.title}
+                               </h2>
+                               {activeCategoryData.questions.map((q, i) => <FAQItem key={i} {...q} />)}
+                           </div>
                        </section>
                    </main>
 
